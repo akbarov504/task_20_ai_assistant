@@ -74,6 +74,15 @@ class GeminiLive:
             generation_config["thinkingConfig"] = {
                 "thinkingLevel": "high"  # "low", "medium", "high"
             }
+        prompt  = ""
+        if self.cfg.payload_prompt_type=="FATIGUE_SYSTEM_PROMPT":
+            prompt = all_prompts['FATIGUE_SYSTEM_PROMPT']
+
+        elif self.cfg.payload_prompt_type=="DASH_CAM_EVENT_PROMPT" and self.cfg.ai_tone=='POLITE':
+            prompt = all_prompts['DASH_CAM_EVENT_PROMPT_POLITE']
+
+        elif self.cfg.payload_prompt_type=="DASH_CAM_EVENT_PROMPT" and self.cfg.ai_tone=='AGRESSIVE':
+            prompt = all_prompts['DASH_CAM_EVENT_PROMPT_AGRESSIVE']
 
         setup = {
             "setup": {
@@ -82,7 +91,7 @@ class GeminiLive:
                 "systemInstruction": {
                     "parts": [
                         {
-                            "text": all_prompts[self.cfg.payload_prompt_type]
+                            "text": prompt
                         }
                     ]
                 },
@@ -105,10 +114,8 @@ class GeminiLive:
             "with a brief greeting and one short question. "
             "Do not invent a reason for the call."
         )
-        if "DASH_CAM_EVENT_PROMPT" in self.cfg.payload_prompt_type and self.cfg.payload:
+        if self.cfg.payload :
             text = text + "\nSystem detected following event details:\n" + self.cfg.payload
-
-        logger.info(f"Starting conversation with prompt: {text}")
         await self.ws.send(json.dumps({
             "clientContent": {
                 "turns": [{

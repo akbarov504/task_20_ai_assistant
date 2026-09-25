@@ -38,31 +38,43 @@ class DriverEventRequest(BaseModel):
     )
 
     def to_gemini_payload(self) -> str:
-        lines = ["--- SAFETY EVENT DETAILS ---"]
-        if self.event:
-            lines.append(f"Event: {self.event}")
-        if self.driver_full_name:
-            lines.append(f"Driver Name: {self.driver_full_name}")
-        if self.cdl:
-            lines.append(f"CDL: {self.cdl}")
-        if self.unit_number:
-            lines.append(f"Unit Number: {self.unit_number}")
-        if self.company:
-            lines.append(f"Company: {self.company}")
-        if self.phone_number:
-            lines.append(f"Phone Number: {self.phone_number}")
-        if self.truck_speed:
-            lines.append(f"Truck Speed: {self.truck_speed}")
-        if self.speed_limit:
-            lines.append(f"Speed Limit: {self.speed_limit}")
-        if self.speeding_today is not None:
-            lines.append(f"Speeding Violations Today: {self.speeding_today}")
-        if self.datetime:
-            lines.append(f"Event Datetime: {self.datetime}")
-        if self.event_assessment:
-            lines.append(f"Event Assessment: {self.event_assessment}")
-        lines.append("----------------------------")
-        return "\n".join(lines)
+        if "DASH_CAM_EVENT_PROMPT" in self.payload_prompt_type:
+            lines = ["--- SAFETY EVENT DETAILS ---"]
+            if self.event:
+                lines.append(f"Event: {self.event}")
+            if self.driver_full_name:
+                lines.append(f"Driver Name: {self.driver_full_name}")
+            if self.cdl:
+                lines.append(f"CDL: {self.cdl}")
+            if self.unit_number:
+                lines.append(f"Unit Number: {self.unit_number}")
+            if self.company:
+                lines.append(f"Company: {self.company}")
+            if self.phone_number:
+                lines.append(f"Phone Number: {self.phone_number}")
+            if self.truck_speed:
+                lines.append(f"Truck Speed: {self.truck_speed}")
+            if self.speed_limit:
+                lines.append(f"Speed Limit: {self.speed_limit}")
+            if self.speeding_today is not None:
+                lines.append(f"Speeding Violations Today: {self.speeding_today}")
+            if self.datetime:
+                lines.append(f"Event Datetime: {self.datetime}")
+            if self.event_assessment:
+                lines.append(f"Event Assessment: {self.event_assessment}")
+            lines.append("----------------------------")
+            return "\n".join(lines)
+
+        
+        if self.payload_prompt_type=="FATIGUE_SYSTEM_PROMPT":
+            lines = ["--- SAFETY EVENT DETAILS ---"]
+            if self.driver_full_name:
+                lines.append(f"Driver Name: {self.driver_full_name}")
+            if self.event_assessment:
+                lines.append(f"Event Assessment: {self.event_assessment}")
+            lines.append("----------------------------")
+            return "\n".join(lines)
+
 
 class CloseCallRequest(BaseModel):
     cdl: str = Field(..., min_length=1, description="Driver CDL is required")

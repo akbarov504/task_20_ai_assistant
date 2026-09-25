@@ -48,11 +48,11 @@ class Config:
     analyse_model: str = os.getenv("ANALYSE_MODEL", "gemini-3.7-flash")
     ai_tone: str = os.getenv("AI_TONE", "")
 
-    def __post_init__(self) -> None:
-        if self.payload_prompt_type not in all_prompts:
-            raise ValueError(
-                f"payload_prompt_type must be one of: {tuple(all_prompts)}"
-            )
+    # def __post_init__(self) -> None:
+    #     if self.payload_prompt_type not in all_prompts:
+    #         raise ValueError(
+    #             f"payload_prompt_type must be one of: {tuple(all_prompts)}"
+    #         )
 
     def with_event(self, driver_cdl: str, payload: str, call_type: str = None, payload_prompt_type: str = None, call_id: str = None, ai_tone: str = None) -> "Config":
         overrides = {
