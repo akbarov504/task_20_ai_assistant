@@ -1,0 +1,533 @@
+================================================================================
+  PROJECT DEPLOYMENT GUIDE — ai_assistant
+  For DevOps / Server Deployment
+================================================================================
+
+GIT REPOSITORY
+--------------
+  URL     : https://git.greenlighteld.com/aakbarov/task_20_ai_assistant
+  Branch  : master (or as agreed)
+  Clone   : git clone https://git.greenlighteld.com/aakbarov/task_20_ai_assistant
+
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+
+  Name        : ai_assistant
+  Type        : FastAPI REST API service (async Python)
+  Purpose     : Automated AI voice safety check-in calls to truck drivers
+                via WebRTC + Google Gemini Live AI.
+                - Receives safety events (speeding, dash cam etc.) via REST API
+                - Initiates a real-time AI voice call to the driver
+                - Records the conversation as mono MP3 audio
+                - Analyses the recorded audio using Gemini AI
+                - Uploads recording to Google Cloud Storage
+                - Saves all data to PostgreSQL database
+                - Sends analysis result to Greenlight backend via webhook
+
+  Entry Point : main.py
+  API Port    : 8787
+  Workers     : 2 (uvicorn multi-worker)
+
+
+================================================================================
+2. TECHNOLOGY STACK & MODULES
+================================================================================
+
+  Runtime         : Python 3.11+
+  Web Framework   : FastAPI >= 0.110.0
+  ASGI Server     : Uvicorn[standard] >= 0.28.0
+  WebRTC          : aiortc >= 1.9.0
+  WebSocket/STOMP : websockets >= 13.0
+  HTTP Client     : aiohttp >= 3.10.0
+  Audio (encode)  : av >= 12.0.0 (PyAV — FFmpeg bindings)
+  Audio (mix)     : numpy >= 1.26.0
+  AI Provider     : google-genai >= 2.0.0 (Gemini Live API)
+  AI Analysis     : langchain-google-genai >= 4.0.0
+                    langchain >= 1.4.0
+                    langchain-core >= 1.6.0
+  Cloud Storage   : google-cloud-storage >= 3.0.0 (GCS)
+  Database ORM    : sqlalchemy[asyncio] >= 2.0.0
+  DB Driver(async): asyncpg >= 0.30.0
+  DB Driver(sync) : psycopg2-binary >= 2.9.0
+  DB Migrations   : alembic >= 1.13.0
+  Config          : python-dotenv >= 1.0.1
+  Validation      : pydantic >= 2.0.0
+
+
+================================================================================
+3. SYSTEM DEPENDENCIES (must be installed on server OS)
+================================================================================
+
+  - Python 3.11 or higher
+  - pip (Python package manager)
+  - FFmpeg (required by PyAV for audio encoding)
+      Ubuntu/Debian : sudo apt-get install -y ffmpeg
+      CentOS/RHEL   : sudo yum install -y ffmpeg
+  - PostgreSQL 14+ (can be on same server or remote)
+  - libpq-dev (for psycopg2)
+      Ubuntu/Debian : sudo apt-get install -y libpq-dev python3-dev
+  - gcc / build-essential (for native extensions)
+      Ubuntu/Debian : sudo apt-get install -y build-essential
+
+
+================================================================================
+4. PYTHON SETUP
+================================================================================
+
+  # Create virtual environment
+  python3 -m venv venv
+
+  # Activate
+  source venv/bin/activate
+
+  # Install dependencies
+  pip install -r requirements.txt
+
+
+================================================================================
+5. ENVIRONMENT VARIABLES (.env file)
+================================================================================
+
+  Copy or create .env file in the project root.
+  Set APP_ENV=dev for development, APP_ENV=prod for production.
+  All credentials are auto-selected based on APP_ENV.
+
+  -----------------------------------------------------------------------
+  # ── Environment selector (ONLY THIS LINE changes per environment) ────
+  APP_ENV=prod                    # "dev" or "prod"
+
+  # ── Call service (auto-selected by APP_ENV, no need to change) ───────
+  # DEV  values auto-selected when APP_ENV=dev
+  DEV_CALL_SUPPORT_URL=https://dev-support.gleld.com
+  DEV_CALL_SERVICE_URL=https://dev-api.gleld.com
+  DEV_CALL_WSS_URL=wss://dev-api.gleld.com/call-service/ws/calls
+  DEV_CALL_AUTH_USERNAME=safety.ops@gmail.com
+  DEV_CALL_AUTH_PASSWORD=<dev_password>
+
+  # PROD values auto-selected when APP_ENV=prod
+  PROD_CALL_SUPPORT_URL=https://api.oztpeld.com.com
+  PROD_CALL_SERVICE_URL=https://api.oztpeld.com.com
+  PROD_CALL_WSS_URL=wss://api.oztpeld.com.com/call-service/ws/calls
+  PROD_CALL_AUTH_USERNAME=safety.ops@gmail.com
+  PROD_CALL_AUTH_PASSWORD=<prod_password>
+
+  # Shared
+  CALL_AUTH_HASH=
+  CALL_TYPE=DIRECT
+
+  # ── Gemini AI ─────────────────────────────────────────────────────────
+  GEMINI_API_KEY=<your_gemini_api_key>
+  GOOGLE_API_KEY=<your_google_api_key>
+  GEMINI_MODEL=gemini-3.1-flash-live-preview
+  GEMINI_VOICE=Aoede
+
+  # ── Audio recordings ──────────────────────────────────────────────────
+  RECORDINGS_DIR=app/utils/recordings
+
+  # ── PostgreSQL database ───────────────────────────────────────────────
+  DB_HOST=localhost
+  DB_PORT=5432
+  DB_NAME=ai_assistant_db
+  DB_USER=<db_user>
+  DB_PASSWORD=<db_password>
+  DATABASE_URL=postgresql+asyncpg://<user>:<pass>@<host>:5432/ai_assistant_db
+  DATABASE_URL_SYNC=postgresql+psycopg2://<user>:<pass>@<host>:5432/ai_assistant_db
+
+  # ── Audio analysis ────────────────────────────────────────────────────
+  ANALYSE_PROVIDER=gemini
+  ANALYSE_MODEL=gemini-3.7-flash
+
+  # ── Webhook (auto-selected by APP_ENV, no need to change) ────────────
+  # dev  -> https://dev-bot.greenlighteld.com/gateway/api/v1/public/safety/ai-calls/callback
+  # prod -> https://bot.greenlighteld.com/gateway/api/v1/public/safety/ai-calls/callback
+  WEBHOOK_X_KEY=<webhook_secret_key>
+
+  # ── GCS (auto-selected by APP_ENV, no need to change) ────────────────
+  # dev  -> bucket: util-dev,  creds: green-light-eld-access-dev.json
+  # prod -> bucket: util-prod, creds: green-light-eld-access-prod.json
+  -----------------------------------------------------------------------
+
+  AUTO-SWITCHING SUMMARY (set only APP_ENV):
+
+  Variable              | APP_ENV=dev                          | APP_ENV=prod
+  ----------------------|--------------------------------------|--------------------------------------
+  CALL_SERVICE_URL      | https://dev-api.gleld.com            | https://api.oztpeld.com.com
+  CALL_WSS_URL          | wss://dev-api.gleld.com/...          | wss://api.oztpeld.com.com/...
+  CALL_SUPPORT_URL      | https://dev-support.gleld.com        | https://api.oztpeld.com.com
+  GCS Bucket            | util-dev                             | util-prod
+  GCS Credentials file  | green-light-eld-access-dev.json      | green-light-eld-access-prod.json
+  Webhook URL           | dev-bot.greenlighteld.com/...        | bot.greenlighteld.com/...
+
+
+================================================================================
+6. GOOGLE CLOUD STORAGE (GCS) CREDENTIALS
+================================================================================
+
+  Place GCS service account JSON credential files at:
+
+    app/utils/creds/green-light-eld-access-dev.json   (for dev)
+    app/utils/creds/green-light-eld-access-prod.json  (for prod)
+
+  These files are NOT in Git (gitignored for security).
+  Obtain them from the project lead and place manually on the server.
+
+  GCS Buckets:
+    DEV  : util-dev
+    PROD : util-prod
+
+  Blob prefix inside bucket: ai_call_recordings/
+  File format             : <call_id>.mp3
+  Example GCS path        : gs://util-prod/ai_call_recordings/12345.mp3
+  Signed URL expiry       : 7 days
+
+
+================================================================================
+7. POSTGRESQL DATABASE SETUP
+================================================================================
+
+  --- Create database and user ---
+
+  sudo -u postgres psql
+
+  CREATE USER ai_assistant WITH PASSWORD '<strong_password>';
+  CREATE DATABASE ai_assistant_db OWNER ai_assistant;
+  GRANT ALL PRIVILEGES ON DATABASE ai_assistant_db TO ai_assistant;
+  \q
+
+  --- Run migrations (from project root, venv activated) ---
+
+  alembic upgrade head
+
+  Note: Tables are also auto-created on application startup via init_db().
+  Alembic is recommended for production to track schema versions.
+
+
+================================================================================
+8. DATABASE SCHEMA — FULL DDL
+================================================================================
+
+  --- TABLE: events ---
+  -- Stores every incoming /api/event request
+
+  CREATE TABLE events (
+      id                  BIGSERIAL PRIMARY KEY,
+      call_id             VARCHAR(128),
+      cdl                 VARCHAR(64)  NOT NULL,
+      driver_full_name    VARCHAR(255),
+      unit_number         VARCHAR(64),
+      company             VARCHAR(255),
+      phone_number        VARCHAR(64),
+      event_type          VARCHAR(128),
+      truck_speed         VARCHAR(64),
+      speed_limit         VARCHAR(64),
+      speeding_today      INTEGER,
+      event_datetime      VARCHAR(128),
+      event_assessment    TEXT,
+      payload_prompt_type VARCHAR(128),
+      raw_payload         JSONB,
+      status              VARCHAR(64)  NOT NULL DEFAULT 'RECEIVED',
+      created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+      updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
+  );
+
+  CREATE INDEX ix_events_call_id ON events (call_id);
+  CREATE INDEX ix_events_cdl     ON events (cdl);
+  CREATE INDEX ix_events_status  ON events (status);
+
+
+  --- TABLE: calls ---
+  -- Stores each individual AI voice call lifecycle
+
+  CREATE TABLE calls (
+      id                          BIGSERIAL PRIMARY KEY,
+      event_id                    BIGINT REFERENCES events(id) ON DELETE SET NULL,
+      call_id                     VARCHAR(128) NOT NULL,
+      server_call_id              VARCHAR(128),
+      cdl                         VARCHAR(64)  NOT NULL,
+      call_type                   VARCHAR(32)  DEFAULT 'SPECIAL',
+      status                      VARCHAR(64)  DEFAULT 'INITIATED',
+      end_reason                  VARCHAR(128),
+      driver_answered             BOOLEAN      DEFAULT FALSE,
+      ringing_started_at          TIMESTAMPTZ,
+      answered_at                 TIMESTAMPTZ,
+      ended_at                    TIMESTAMPTZ,
+      duration_seconds            FLOAT        DEFAULT 0.0,
+      talk_duration_seconds       FLOAT        DEFAULT 0.0,
+      recording_file_name         VARCHAR(255),
+      recording_gcs_uri           TEXT,
+      recording_signed_url        TEXT,
+      gemini_model                VARCHAR(128),
+      gemini_cost_usd             FLOAT        DEFAULT 0.0,
+      gemini_tokens               JSONB,
+      end_conversation_reason     TEXT,
+      end_conversation_summary    TEXT,
+      end_conversation_fatigue    JSONB,
+      error_message               TEXT,
+      created_at                  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+      updated_at                  TIMESTAMPTZ  NOT NULL DEFAULT now()
+  );
+
+  CREATE INDEX ix_calls_call_id      ON calls (call_id);
+  CREATE INDEX ix_calls_server_call_id ON calls (server_call_id);
+  CREATE INDEX ix_calls_cdl          ON calls (cdl);
+  CREATE INDEX ix_calls_event_id     ON calls (event_id);
+  CREATE INDEX ix_calls_status       ON calls (status);
+
+
+  --- TABLE: call_analyses ---
+  -- Stores AI audio analysis results for each call
+
+  CREATE TABLE call_analyses (
+      id                  BIGSERIAL PRIMARY KEY,
+      call_id             VARCHAR(128) NOT NULL,
+      call_db_id          BIGINT REFERENCES calls(id) ON DELETE CASCADE,
+      provider            VARCHAR(64)  DEFAULT 'gemini',
+      model               VARCHAR(128),
+      is_voice_call_empty BOOLEAN      DEFAULT FALSE,
+      language            VARCHAR(32),
+      call_summary        TEXT,
+      driver_tone         VARCHAR(64),
+      assistant_tone      VARCHAR(64),
+      fatigue_confirmed   BOOLEAN      DEFAULT FALSE,
+      fatigue_reason      TEXT,
+      fatigue_evidence    TEXT,
+      sentiment           VARCHAR(64),
+      conclusion          VARCHAR(255),
+      conflict_present    BOOLEAN      DEFAULT FALSE,
+      conflict_data       JSONB,
+      open_issues         JSONB,
+      solved_issues       JSONB,
+      segments            JSONB,
+      raw_response        JSONB,
+      webhook_sent        BOOLEAN      DEFAULT FALSE,
+      webhook_sent_at     TIMESTAMPTZ,
+      webhook_status_code INTEGER,
+      webhook_response    TEXT,
+      created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+      updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
+  );
+
+  CREATE INDEX ix_call_analyses_call_id    ON call_analyses (call_id);
+  CREATE INDEX ix_call_analyses_call_db_id ON call_analyses (call_db_id);
+
+
+================================================================================
+9. EXTERNAL CONNECTIONS
+================================================================================
+
+  -- DIRECT WebSocket/WebRTC connections (no HTTP proxy needed) --
+
+  Service         | Protocol      | Address
+  ----------------|---------------|------------------------------------------
+  Call Service    | HTTPS / WSS   | dev-api.gleld.com  OR  api.oztpeld.com.com
+  STOMP           | WSS           | /call-service/ws/calls
+  WebRTC ICE/TURN | UDP / TCP     | via ICE config from Call Service
+
+  Note: The application maintains a persistent WebSocket (STOMP) connection
+  and a WebRTC peer connection directly to the Call Service.
+  These are NOT proxied — the server needs direct outbound internet access
+  to the Call Service endpoints above.
+
+
+  -- Outbound API calls (HTTPS) --
+
+  Service              | URL                                          | Purpose
+  ---------------------|----------------------------------------------|---------------------------
+  Gemini Live API      | generativelanguage.googleapis.com            | AI voice call
+  Gemini Analysis API  | generativelanguage.googleapis.com            | Audio analysis
+  Google Cloud Storage | storage.googleapis.com                       | Upload MP3 recordings
+  Greenlight Webhook   | dev-bot.greenlighteld.com  (dev)             | Send analysis result
+                       | bot.greenlighteld.com      (prod)            |
+  Call Support API     | dev-support.gleld.com  (dev)                 | Auth / support ops
+                       | api.oztpeld.com.com    (prod)                |
+
+
+  -- Webhook details --
+
+  Endpoint (dev) : POST https://dev-bot.greenlighteld.com/gateway/api/v1/public/safety/ai-calls/callback
+  Endpoint (prod): POST https://bot.greenlighteld.com/gateway/api/v1/public/safety/ai-calls/callback
+  Header         : X-Key: <WEBHOOK_X_KEY>
+  Content-Type   : application/json
+
+  Webhook body example:
+  {
+    "call_id": 2345,
+    "audio_url": "https://storage.googleapis.com/...signed_url...",
+    "provider": "gemini",
+    "model": "gemini-3.7-flash",
+    "answer": {
+      "is_this_voice_call_empty": false,
+      "language": "en",
+      "common": { ... full VoiceAnalysisResult ... }
+    }
+  }
+
+
+================================================================================
+10. API ENDPOINTS
+================================================================================
+
+  GET  /              -> Health check
+  GET  /health        -> Health check (returns active calls count)
+  POST /api/event     -> Trigger AI voice call (main endpoint)
+
+  POST /api/event — Request body (JSON):
+  {
+    "cdl"               : "TX123456",       // REQUIRED — Driver CDL number
+    "call_id"           : "2345",           // Optional — ID for recording/DB
+    "driver_full_name"  : "John Doe",       // Optional
+    "unit_number"       : "UNIT-001",       // Optional
+    "company"           : "ABC Trucking",   // Optional
+    "phone_number"      : "+15551234567",   // Optional
+    "event"             : "speeding",       // Optional — event type
+    "truck_speed"       : "75",             // Optional
+    "speed_limit"       : "65",             // Optional
+    "speeding_today"    : 3,                // Optional — count today
+    "datetime"          : "2026-09-24T10:00:00Z", // Optional
+    "event_assessment"  : "High risk",      // Optional
+    "payload_prompt_type": "DASH_CAM_EVENT_PROMPT_POLITE", // Optional
+    "ai_tone"           : "polite"          // Optional — AI voice tone
+  }
+
+  Response (202 Accepted):
+  {
+    "status"            : "accepted",
+    "message"           : "Call initiated for driver",
+    "call_id"           : "2345",
+    "cdl"               : "TX123456",
+    "event"             : "speeding",
+    "active_calls_count": 1
+  }
+
+
+================================================================================
+11. AUDIO RECORDING
+================================================================================
+
+  Format    : MP3, mono (1 channel), 24kHz
+  Mix       : Driver audio (resampled 16kHz->24kHz) + Gemini AI (24kHz)
+              both mixed into single mono channel
+  Location  : app/utils/recordings/<call_id>.mp3  (temporary)
+  Lifecycle : Created on call end -> Analysed -> Uploaded to GCS -> Deleted locally
+
+  Ensure the recordings directory exists and is writable:
+    mkdir -p app/utils/recordings
+    chmod 755 app/utils/recordings
+
+
+================================================================================
+12. STARTING THE SERVICE
+================================================================================
+
+  # Activate venv
+  source venv/bin/activate
+
+  # Run database migrations
+  alembic upgrade head
+
+  # Start service
+  python main.py
+
+  OR with uvicorn directly:
+  uvicorn main:app --host 0.0.0.0 --port 8787 --workers 2
+
+
+================================================================================
+13. SYSTEMD SERVICE (recommended for production)
+================================================================================
+
+  Create file: /etc/systemd/system/ai_assistant.service
+
+  -----------------------------------------------------------------------
+  [Unit]
+  Description=AI Assistant Safety Call Service
+  After=network.target postgresql.service
+
+  [Service]
+  Type=exec
+  User=<your_linux_user>
+  WorkingDirectory=/path/to/task_20_ai_assistant
+  EnvironmentFile=/path/to/task_20_ai_assistant/.env
+  ExecStart=/path/to/task_20_ai_assistant/venv/bin/python main.py
+  Restart=always
+  RestartSec=5
+  StandardOutput=journal
+  StandardError=journal
+  SyslogIdentifier=ai_assistant
+
+  [Install]
+  WantedBy=multi-user.target
+  -----------------------------------------------------------------------
+
+  # Enable and start
+  sudo systemctl daemon-reload
+  sudo systemctl enable ai_assistant
+  sudo systemctl start ai_assistant
+
+  # Check status
+  sudo systemctl status ai_assistant
+
+  # View logs
+  sudo journalctl -u ai_assistant -f
+
+
+================================================================================
+14. REQUIRED DIRECTORY STRUCTURE ON SERVER
+================================================================================
+
+  task_20_ai_assistant/
+  ├── .env                                  <- create from this guide
+  ├── main.py
+  ├── requirements.txt
+  ├── alembic.ini
+  ├── migrations/
+  ├── venv/                                 <- created via python -m venv venv
+  ├── app/
+  │   ├── utils/
+  │   │   ├── recordings/                   <- mkdir -p (must be writable)
+  │   │   └── creds/
+  │   │       ├── green-light-eld-access-dev.json   <- place manually (NOT in git)
+  │   │       └── green-light-eld-access-prod.json  <- place manually (NOT in git)
+
+
+================================================================================
+15. FIREWALL / NETWORK REQUIREMENTS
+================================================================================
+
+  Inbound:
+    TCP 8787    <- API port (or expose via nginx reverse proxy on 80/443)
+
+  Outbound (server must reach):
+    TCP 443     -> api.oztpeld.com.com         (Call Service HTTPS)
+    TCP 443     -> generativelanguage.googleapis.com  (Gemini API)
+    TCP 443     -> storage.googleapis.com      (Google Cloud Storage)
+    TCP 443     -> bot.greenlighteld.com       (Webhook prod)
+    UDP/TCP     -> TURN/ICE servers            (WebRTC, IPs from ICE config)
+    TCP 5432    -> PostgreSQL (if remote)
+
+
+================================================================================
+16. QUICK CHECKLIST FOR DEVOPS
+================================================================================
+
+  [ ] Clone repo from https://git.greenlighteld.com/aakbarov/task_20_ai_assistant
+  [ ] Install OS dependencies: python3.11+, ffmpeg, libpq-dev, build-essential
+  [ ] Create Python virtual environment: python3 -m venv venv
+  [ ] Install Python packages: pip install -r requirements.txt
+  [ ] Create PostgreSQL database and user
+  [ ] Create .env file (copy template from Section 5, set APP_ENV=prod)
+  [ ] Place GCS credential JSON files in app/utils/creds/
+  [ ] Create recordings directory: mkdir -p app/utils/recordings
+  [ ] Run migrations: alembic upgrade head
+  [ ] Configure systemd service (Section 13)
+  [ ] Open firewall port 8787 (or configure nginx reverse proxy)
+  [ ] Verify outbound access to all external services (Section 15)
+  [ ] Start service: sudo systemctl start ai_assistant
+  [ ] Check health: curl http://localhost:8787/health
+
+================================================================================
+  END OF DEPLOYMENT GUIDE
+  Contact: aakbarov (GitLab: https://git.greenlighteld.com/aakbarov)
+================================================================================
